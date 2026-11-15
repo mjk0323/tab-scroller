@@ -144,3 +144,32 @@ kbd { font: 12px ui-monospace, monospace; padding: 1px 6px; border: 1px solid va
   .status { margin-left: 0; width: 100%; }
   .scroller { padding: 12px 8px; }
 }
+
+/* ---------- chords ---------- */
+.btn.toggle.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.chord-bar {
+  display: flex; align-items: center; gap: 18px;
+  padding: 6px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
+  color: var(--text); z-index: 1; min-height: 96px;
+}
+.chord-now { color: var(--accent); }
+.chord-next { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.chord-next-label { font-size: 12px; writing-mode: vertical-rl; letter-spacing: 2px; }
+.chord-end { font-size: 13px; }
+.chord-upcoming { display: flex; gap: 10px; flex-wrap: wrap; color: var(--muted); font-weight: 600; font-size: 13px; min-width: 0; overflow: hidden; max-height: 40px; }
+.chord-upcoming span::before { content: '→ '; opacity: .5; font-weight: 400; }
+.chord-diagram { display: block; overflow: visible; }
+
+.chord-pin {
+  position: absolute; transform: translate(-15%, -100%);
+  color: #1d1d1f; background: rgba(255, 255, 255, 0.88); border-radius: 4px; padding: 1px;
+  pointer-events: auto;
+}
+.chord-pin.inferred { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent); }
+.chord-pin.active { color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.scroller.invert .chord-pin { filter: invert(0.92) hue-rotate(180deg); }
+
+@media (max-width: 640px) {
+  .chord-bar { gap: 10px; padding: 6px 12px; min-height: 0; }
+  .chord-upcoming { display: none; }
+}
