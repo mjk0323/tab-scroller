@@ -1,21 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
- * Smoothly scrolls `el` downward at `speed` CSS px per second while playing.
- * Manual scrolling (wheel / touch / scrollbar) during playback is respected:
- * the scroller picks up from wherever the user left it.
+ * A driver decides where the view should be after each frame.
+ * - sync(): called when playback starts or the user scrolled by hand,
+ *   so the driver can pick up from the current position.
+ * - advance(): move forward by dt seconds; return the new scrollTop,
+ *   or null when the piece is over.
  */
+export interface ScrollDriver {
+  sync(scrollTop: number): void;
+  advance(dt: number, maxScroll: number): number | null;
+}
+
 export function useAutoScroll(
   el: HTMLElement | null,
-  speed: number,
+  driverRef: React.MutableRefObject<ScrollDriver>,
   startDelaySec: number,
 ) {
   const [playing, setPlaying] = useState(false);
   const [countdown, setCountdown] = useState(0);
-  const speedRef = useRef(speed);
-  speedRef.current = speed;
+  const delayRef = useRef(startDelaySec);
+  delayRef.current = startDelaySec;
 
-  // countdown before playback starts
   useEffect(() => {
     if (countdown <= 0) return;
     const t = window.setTimeout(() => {
@@ -28,39 +34,35 @@ export function useAutoScroll(
   useEffect(() => {
     if (!playing || !el) return;
     let raf = 0;
-    let last = performance.now();
-    let pos = el.scrollTop;
+    let lastT = performance.now();
+    let lastTop = el.scrollTop;
+    driverRef.current.sync(lastTop);
 
     const tick = (now: number) => {
-      const dt = Math.min((now - last) / 1000, 0.1); // clamp after tab switches
-      last = now;
-      // user moved the view manually -> continue from there
-      if (Math.abs(el.scrollTop - pos) > 2) pos = el.scrollTop;
-      pos += speedRef.current * dt;
+      const dt = Math.min((now - lastT) / 1000, 0.1); // clamp after tab switches
+      lastT = now;
+      // user moved the view by hand -> continue from there
+      if (Math.abs(el.scrollTop - lastTop) > 3) driverRef.current.sync(el.scrollTop);
       const max = el.scrollHeight - el.clientHeight;
-      if (pos >= max) {
-        el.scrollTop = max;
+      const next = driverRef.current.advance(dt, max);
+      if (next === null) {
         setPlaying(false);
         return;
       }
-      el.scrollTop = pos;
+      lastTop = Math.max(0, Math.min(max, next));
+      el.scrollTop = lastTop;
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [playing, el]);
+  }, [playing, el, driverRef]);
 
   const toggle = useCallback(() => {
-    if (playing) {
-      setPlaying(false);
-    } else if (countdown > 0) {
-      setCountdown(0); // cancel count-in
-    } else if (startDelaySec > 0) {
-      setCountdown(startDelaySec);
-    } else {
-      setPlaying(true);
-    }
-  }, [playing, countdown, startDelaySec]);
+    if (playing) setPlaying(false);
+    else if (countdown > 0) setCountdown(0);
+    else if (delayRef.current > 0) setCountdown(delayRef.current);
+    else setPlaying(true);
+  }, [playing, countdown]);
 
   const stop = useCallback(() => {
     setPlaying(false);

@@ -65,11 +65,42 @@ body {
 .ctrl input[type='range'] { width: 110px; accent-color: var(--accent); }
 .ctrl select { font: inherit; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); }
 .ctrl.check input { accent-color: var(--accent); }
-.filename { margin-left: auto; color: var(--muted); max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status { margin-left: auto; display: flex; gap: 10px; align-items: center; color: var(--muted); min-width: 0; }
+.status span { white-space: nowrap; }
+.filename { max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.ctrl input.num { width: 56px; font: inherit; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); text-align: center; }
+
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { font: inherit; padding: 5px 10px; border: 0; background: var(--panel); color: var(--muted); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button.on { background: var(--text); color: var(--panel); }
+.seg button:disabled { opacity: 0.4; cursor: default; }
+
+.more { position: relative; }
+.more summary { list-style: none; }
+.more summary::-webkit-details-marker { display: none; }
+.more-panel {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 5;
+  display: flex; flex-direction: column; gap: 10px; padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.15); min-width: 220px;
+}
 
 /* ---------- score area ---------- */
 .scroller { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 16px; }
 .pages { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.page-wrap { position: relative; }
+.sys { position: absolute; pointer-events: none; border-radius: 4px; }
+.sys.debug { outline: 1.5px dashed color-mix(in srgb, var(--accent) 70%, transparent); }
+.sys.active { background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: -6px 0 0 var(--accent); }
+.sys .bar { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.sys .badge {
+  position: absolute; right: 0; top: -22px; pointer-events: auto;
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 4px;
+  font-size: 12px; font-weight: 600; color: #fff; background: var(--accent); border-radius: 6px;
+}
+.sys .badge button { font: inherit; line-height: 1; width: 18px; height: 18px; border: 0; border-radius: 4px; background: rgba(255,255,255,.25); color: #fff; cursor: pointer; padding: 0; }
+.scroller { position: relative; }
 .page { display: block; background: #fff; box-shadow: var(--page-shadow); max-width: 100%; }
 .scroller.invert .page { filter: invert(0.92) hue-rotate(180deg); }
 .tail { height: 60vh; }
@@ -110,5 +141,6 @@ kbd { font: 12px ui-monospace, monospace; padding: 1px 6px; border: 1px solid va
   .toolbar { padding: 8px 12px; gap: 8px 10px; }
   .ctrl input[type='range'] { width: 80px; }
   .filename { display: none; }
+  .status { margin-left: 0; width: 100%; }
   .scroller { padding: 12px 8px; }
 }
