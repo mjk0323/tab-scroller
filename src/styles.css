@@ -1,0 +1,114 @@
+:root {
+  --bg: #f4f4f2;
+  --panel: #ffffff;
+  --text: #1d1d1f;
+  --muted: #6b6b70;
+  --border: #dcdcd8;
+  --accent: #e0662b;
+  --accent-text: #ffffff;
+  --page-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #18181a;
+    --panel: #232326;
+    --text: #ececee;
+    --muted: #9a9aa0;
+    --border: #36363a;
+    --accent: #f07a3e;
+    --page-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+  }
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', sans-serif;
+  font-size: 14px;
+}
+
+.app { height: 100%; display: flex; flex-direction: column; position: relative; }
+
+/* ---------- toolbar ---------- */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 8px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  z-index: 2;
+}
+.brand { font-weight: 700; margin-right: 4px; white-space: nowrap; }
+.btn {
+  font: inherit;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) { border-color: var(--accent); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); min-width: 84px; font-weight: 600; }
+.btn.primary.active { filter: brightness(0.9); }
+.btn.small { padding: 2px 8px; }
+.ctrl { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.ctrl span { white-space: nowrap; }
+.ctrl output { color: var(--text); min-width: 3ch; font-variant-numeric: tabular-nums; }
+.ctrl input[type='range'] { width: 110px; accent-color: var(--accent); }
+.ctrl select { font: inherit; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); }
+.ctrl.check input { accent-color: var(--accent); }
+.filename { margin-left: auto; color: var(--muted); max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- score area ---------- */
+.scroller { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 16px; }
+.pages { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.page { display: block; background: #fff; box-shadow: var(--page-shadow); max-width: 100%; }
+.scroller.invert .page { filter: invert(0.92) hue-rotate(180deg); }
+.tail { height: 60vh; }
+
+.empty {
+  max-width: 520px;
+  margin: 10vh auto 0;
+  padding: 40px 24px;
+  border: 2px dashed var(--border);
+  border-radius: 16px;
+  text-align: center;
+  cursor: pointer;
+}
+.empty:hover { border-color: var(--accent); }
+.empty-icon { font-size: 48px; }
+.empty-title { font-size: 16px; font-weight: 600; margin: 12px 0 4px; }
+.empty-sub { color: var(--muted); margin: 0 0 20px; }
+.keys { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 16px; color: var(--muted); }
+kbd { font: 12px ui-monospace, monospace; padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; color: var(--text); margin-right: 3px; }
+
+.error { max-width: 520px; margin: 16px auto; padding: 10px 14px; border-radius: 8px; background: #fde8e4; color: #8a2a12; }
+
+/* ---------- overlays ---------- */
+.countdown {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 160px; font-weight: 800; color: var(--accent);
+  background: color-mix(in srgb, var(--bg) 40%, transparent);
+  pointer-events: none;
+}
+.dropzone {
+  position: absolute; inset: 8px; display: grid; place-items: center;
+  border: 3px dashed var(--accent); border-radius: 16px;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  font-size: 22px; font-weight: 600; pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  .toolbar { padding: 8px 12px; gap: 8px 10px; }
+  .ctrl input[type='range'] { width: 80px; }
+  .filename { display: none; }
+  .scroller { padding: 12px 8px; }
+}
