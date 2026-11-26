@@ -1,5 +1,5 @@
 import type { NoteMark, PageAnalysis, Staff } from './analysis';
-import { parseChordName, recognize, reconcile, shapeFor, type Frets, type TabNote } from './music';
+import { parseChordName, recognize, reconcile, shapeFor, spellingFor, type Frets, type Spelling, type TabNote } from './music';
 
 export interface ChordEvent {
   system: number; // index into the systems list
@@ -61,7 +61,7 @@ function bassNotes(notes: NoteMark[]): number[] {
  * Tries every way of cutting the bar on beat boundaries (1–4 chords) and
  * keeps the one with the best note-weighted fit, minus a cost per change.
  */
-function segmentBar(inBar: NoteMark[], x0: number, x1: number): { notes: NoteMark[]; chord: Recognized }[] {
+function segmentBar(inBar: NoteMark[], x0: number, x1: number, sp: Spelling): { notes: NoteMark[]; chord: Recognized }[] {
   const slotOf = (n: NoteMark) => Math.min(SLOTS - 1, Math.max(0, Math.floor(((n.x - x0) / (x1 - x0)) * SLOTS)));
   const total = inBar.length;
   const cache = new Map<string, { notes: NoteMark[]; chord: Recognized; value: number } | null>();
@@ -70,7 +70,7 @@ function segmentBar(inBar: NoteMark[], x0: number, x1: number): { notes: NoteMar
     if (cache.has(k)) return cache.get(k)!;
     const notes = inBar.filter((n) => slotOf(n) >= a && slotOf(n) < b);
     const pcs = new Set(notes.map((n) => n.string * 100 + n.fret));
-    const chord = pcs.size >= 2 ? recognize(toTab(notes)) : null;
+    const chord = pcs.size >= 2 ? recognize(toTab(notes), sp) : null;
     let penalty = pcs.size < 3 ? 0.15 : 0; // thin evidence is less trustworthy than a full voicing
     if (chord) {
       // A new chord usually brings a new bass note. Two different bass notes in one
@@ -122,6 +122,7 @@ function segmentBar(inBar: NoteMark[], x0: number, x1: number): { notes: NoteMar
 
 export function buildChordEvents(pages: PageAnalysis[], systems: SystemRef[], ignorePrinted: boolean): ChordEvent[] {
   const events: ChordEvent[] = [];
+  const sp = spellingFor(pages.flatMap((p) => toTab(p.notes)));
 
   systems.forEach((r, si) => {
     const pa = pages[r.page];
@@ -154,7 +155,7 @@ export function buildChordEvents(pages: PageAnalysis[], systems: SystemRef[], ig
         const seg = toTab(notes.filter((n) => n.x >= l.x - tol && n.x < end));
         // "?" = a printed chord box whose name OCR couldn't read: work it out from the notes
         const parsed = l.text === '?' ? null : parseChordName(l.text);
-        const chord = parsed ? reconcile(parsed, seg) : recognize(seg);
+        const chord = parsed ? reconcile(parsed, seg) : recognize(seg, sp);
         if (!chord) return;
         push(l.x, chord.name, shapeFor(chord, seg), l.diagram, !!parsed, l.y);
       });
@@ -169,7 +170,7 @@ export function buildChordEvents(pages: PageAnalysis[], systems: SystemRef[], ig
       const inBar = notes.filter((n) => n.x >= x0 && n.x < x1);
       if (!inBar.length) continue;
 
-      for (const seg of segmentBar(inBar, x0, x1)) {
+      for (const seg of segmentBar(inBar, x0, x1, sp)) {
         push(seg.notes[0].x, seg.chord.name, shapeFor(seg.chord, toTab(seg.notes)), false, false, null);
       }
     }

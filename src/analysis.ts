@@ -286,9 +286,17 @@ async function readText(page: PDFPageProxy): Promise<TextBit[]> {
 export async function analyzePage(doc: PDFDocumentProxy, pageNumber: number): Promise<PageAnalysis> {
   const page = await doc.getPage(pageNumber);
   const { ink, lum, W, H } = await inkMask(page);
-  const staves = groupStaves(findHorizontalLines(ink, W, H), H)
-    .map((g) => analyzeStaff(ink, W, H, g))
-    .filter(isRealStaff);
+  const detect = (mask: Uint8Array) =>
+    groupStaves(findHorizontalLines(mask, W, H), H)
+      .map((g) => analyzeStaff(mask, W, H, g))
+      .filter(isRealStaff);
+  let staves = detect(ink);
+  if (!staves.length) {
+    // Some exports (e.g. Songsterr) draw staff lines and barlines in light grey.
+    const light = new Uint8Array(W * H);
+    for (let i = 0; i < light.length; i++) light[i] = lum[i] < 230 ? 1 : 0;
+    staves = detect(light);
+  }
   const text = await readText(page).catch(() => [] as TextBit[]);
 
   // Printed chord boxes. With no staff at all the page is a chord chart

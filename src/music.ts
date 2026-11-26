@@ -9,6 +9,30 @@ export type Frets = (number | null)[];
 
 export const OPEN_MIDI = [64, 59, 55, 50, 45, 40]; // standard tuning, 1st → 6th string
 const NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'G#', 'A', 'Bb', 'B'];
+const SHARPS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const FLATS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+export type Spelling = 'mixed' | 'sharp' | 'flat';
+const spellTable = (sp: Spelling) => (sp === 'sharp' ? SHARPS : sp === 'flat' ? FLATS : NAMES);
+
+/**
+ * Sharps or flats for this song, from its notes: find the major key whose scale
+ * covers the most notes, then use that key signature's accidentals.
+ */
+export function spellingFor(notes: TabNote[]): Spelling {
+  if (notes.length < 20) return 'mixed';
+  const hist = new Array(12).fill(0);
+  for (const n of notes) hist[(OPEN_MIDI[n.string - 1] + n.fret) % 12]++;
+  const major = [0, 2, 4, 5, 7, 9, 11];
+  let best = 0;
+  let bestScore = -1;
+  for (let k = 0; k < 12; k++) {
+    const sc = major.reduce((a, i) => a + hist[(k + i) % 12], 0);
+    if (sc > bestScore) ((bestScore = sc), (best = k));
+  }
+  if ([7, 2, 9, 4, 11, 6, 1].includes(best)) return 'sharp'; // G D A E B F# C# (and their relative minors)
+  if ([5, 10, 3, 8].includes(best)) return 'flat'; // F Bb Eb Ab
+  return 'mixed';
+}
 const LETTER_PC: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 
 export interface Quality {
@@ -55,9 +79,10 @@ export interface Chord {
   name: string;
 }
 
-function chordName(root: number, q: Quality, bass: number | null, rootLabel?: string, bassLabel?: string) {
-  const r = rootLabel ?? pcName(root);
-  const b = bass === null ? '' : '/' + (bassLabel ?? pcName(bass));
+function chordName(root: number, q: Quality, bass: number | null, rootLabel?: string, bassLabel?: string, sp: Spelling = 'mixed') {
+  const t = spellTable(sp);
+  const r = rootLabel ?? t[root];
+  const b = bass === null ? '' : '/' + (bassLabel ?? t[bass]);
   return r + q.suffix + b;
 }
 
@@ -101,7 +126,7 @@ function fit(p: Profile, root: number, q: Quality): number {
 }
 
 /** Best chord for a set of tab notes, or null if there is not enough to go on. */
-export function recognize(notes: TabNote[]): (Chord & { score: number }) | null {
+export function recognize(notes: TabNote[], sp: Spelling = 'mixed'): (Chord & { score: number }) | null {
   const p = profile(notes);
   if (!p || p.w.filter((v) => v > 0).length < 2) return null;
   let best: (Chord & { score: number }) | null = null;
@@ -111,7 +136,7 @@ export function recognize(notes: TabNote[]): (Chord & { score: number }) | null 
       if (!best || s > best.score) {
         const inChord = q.iv.some((i) => (root + i) % 12 === p.bassPc);
         const bass = p.bassPc !== root && inChord ? p.bassPc : null;
-        best = { root, quality: q, bass, name: chordName(root, q, bass), score: s };
+        best = { root, quality: q, bass, name: chordName(root, q, bass, undefined, undefined, sp), score: s };
       }
     }
   }
@@ -119,7 +144,7 @@ export function recognize(notes: TabNote[]): (Chord & { score: number }) | null 
   // (Cadd9, Aadd9) — the 3rd is in the grip, it just isn't picked in the pattern.
   if (best && best.quality.suffix === 'sus2') {
     const q = BY_SUFFIX.get('add9')!;
-    best = { ...best, quality: q, name: chordName(best.root, q, best.bass) };
+    best = { ...best, quality: q, name: chordName(best.root, q, best.bass, undefined, undefined, sp) };
   }
   return best;
 }
