@@ -152,10 +152,11 @@ export function buildChordEvents(pages: PageAnalysis[], systems: SystemRef[], ig
       labels.forEach((l, i) => {
         const end = i + 1 < labels.length ? labels[i + 1].x - tol : s.right;
         const seg = toTab(notes.filter((n) => n.x >= l.x - tol && n.x < end));
-        const parsed = parseChordName(l.text);
-        if (!parsed) return;
-        const chord = reconcile(parsed, seg);
-        push(l.x, chord.name, shapeFor(chord, seg), l.diagram, true, l.y);
+        // "?" = a printed chord box whose name OCR couldn't read: work it out from the notes
+        const parsed = l.text === '?' ? null : parseChordName(l.text);
+        const chord = parsed ? reconcile(parsed, seg) : recognize(seg);
+        if (!chord) return;
+        push(l.x, chord.name, shapeFor(chord, seg), l.diagram, !!parsed, l.y);
       });
       return;
     }

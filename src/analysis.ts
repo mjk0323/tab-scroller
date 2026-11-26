@@ -7,7 +7,7 @@ import { splitChordText } from './music';
  * All coordinates are fractions of the page (0..1) so they survive zoom.
  */
 export interface Staff {
-  lines: number; // 5 or 6
+  lines: number; // 5 or 6 for a staff; 0 for a row of a chord chart (boxes + lyrics, no staff)
   top: number; // y of first line
   bottom: number; // y of last line
   left: number; // x where the staff lines start
@@ -34,14 +34,28 @@ export interface ChordLabel {
   diagram: boolean; // a chord diagram is already printed under it
 }
 
+/** A printed chord box (diagram grid), page fractions. */
+export interface Box {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+}
+
 export interface PageAnalysis {
   staves: Staff[];
   notes: NoteMark[];
   labels: ChordLabel[];
+  boxes: Box[]; // printed chord boxes (diagram grids)
   tempo: number | null;
   capo: number | null;
   aspect: number; // height / width
+  needsOcr: boolean; // no text layer (scanned / image PDF): names and numbers must be read from pixels
 }
+
+export const emptyAnalysis = (): PageAnalysis => ({
+  staves: [], notes: [], labels: [], boxes: [], tempo: null, capo: null, aspect: 1.414, needsOcr: false,
+});
 
 const ANALYSIS_WIDTH = 1200; // px — enough to see thin lines, cheap to scan
 const DARK = 140; // luminance below this counts as ink
@@ -211,7 +225,7 @@ function analyzeStaff(ink: Uint8Array, W: number, H: number, ls: Line[]): Staff 
  * A grid = several short horizontal lines AND several short vertical lines
  * (thin and often light grey, so a lighter ink threshold is used).
  */
-function hasDiagramBelow(lum: Uint8Array, W: number, H: number, x: number, y: number, size: number): boolean {
+export function hasDiagramBelow(lum: Uint8Array, W: number, H: number, x: number, y: number, size: number): boolean {
   const fs = size * H;
   const x0 = Math.max(0, Math.floor(x * W - fs * 0.8));
   const x1 = Math.min(W - 1, Math.ceil(x * W + fs * 3.5));
@@ -272,8 +286,15 @@ async function readText(page: PDFPageProxy): Promise<TextBit[]> {
 export async function analyzePage(doc: PDFDocumentProxy, pageNumber: number): Promise<PageAnalysis> {
   const page = await doc.getPage(pageNumber);
   const { ink, lum, W, H } = await inkMask(page);
-  const staves = groupStaves(findHorizontalLines(ink, W, H), H).map((g) => analyzeStaff(ink, W, H, g));
+  const staves = groupStaves(findHorizontalLines(ink, W, H), H)
+    .map((g) => analyzeStaff(ink, W, H, g))
+    .filter(isRealStaff);
   const text = await readText(page).catch(() => [] as TextBit[]);
+
+  // Printed chord boxes. With no staff at all the page is a chord chart
+  // (rows of chord boxes with lyrics); otherwise they help OCR find chord names.
+  const boxes = findChordBoxes(lum, W, H);
+  if (!staves.length) staves.push(...chartRows(lum, W, H, boxes));
 
   /* fret numbers sitting on a tab staff */
   const notes: NoteMark[] = [];
@@ -322,10 +343,228 @@ export async function analyzePage(doc: PDFDocumentProxy, pageNumber: number): Pr
     if (capo === null && cm) capo = +cm[1];
   }
 
-  return { staves, notes, labels: chordLabels, tempo, capo, aspect: H / W };
+  return {
+    staves,
+    notes,
+    labels: chordLabels,
+    boxes: boxes.map((b) => ({ x0: b.x0 / W, x1: b.x1 / W, y0: b.y0 / H, y1: b.y1 / H })),
+    tempo,
+    capo,
+    aspect: H / W,
+    needsOcr: text.length === 0,
+  };
+}
+
+/**
+ * Rows of chord-box grids line up into what looks like a 6-line staff with a
+ * "barline" at every fret. Real staves have a handful of wide measures.
+ */
+function isRealStaff(s: Staff): boolean {
+  if (s.measures > 12) return false;
+  const gaps = s.bounds.slice(1).map((b, i) => b - s.bounds[i]);
+  const sorted = [...gaps].sort((a, b) => a - b);
+  return !sorted.length || sorted[Math.floor(sorted.length / 2)] >= 0.03;
+}
+
+/* ------------------------------------------------------------------ */
+/* Chord charts                                                        */
+/* ------------------------------------------------------------------ */
+
+interface PxBox {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+}
+
+/**
+ * Find chord-diagram grids by their fret/string lines: at least 4 thin vertical
+ * lines of the same height, evenly spaced, also crossed by horizontal lines.
+ * (Vertical lines are used because neighbouring boxes and open-string circles
+ * make horizontal lines run into each other.)
+ */
+function findChordBoxes(lum: Uint8Array, W: number, H: number): PxBox[] {
+  const faint = (x: number, y: number) => lum[y * W + x] < 200;
+  const minH = H * 0.015;
+  const maxH = H * 0.07;
+
+  // 1. thin vertical lines: per-column runs, merged across adjacent columns
+  interface VLine { x0: number; x1: number; y0: number; y1: number }
+  const lines: VLine[] = [];
+  let active: VLine[] = [];
+  for (let x = 0; x < W; x++) {
+    const next: VLine[] = [];
+    let s = -1;
+    for (let y = 0; y <= H; y++) {
+      const on = y < H && faint(x, y);
+      if (on && s < 0) s = y;
+      if (!on && s >= 0) {
+        const y1 = y - 1;
+        if (y1 - s >= minH && y1 - s <= maxH) {
+          const prev = active.find((l) => Math.abs(l.y0 - s) <= 2 && Math.abs(l.y1 - y1) <= 2);
+          if (prev) {
+            prev.x1 = x;
+            next.push(prev);
+          } else {
+            const l = { x0: x, x1: x, y0: s, y1 };
+            lines.push(l);
+            next.push(l);
+          }
+        }
+        s = -1;
+      }
+    }
+    active = next;
+  }
+  const thin = lines.filter((l) => l.x1 - l.x0 <= 4); // thick bars are measure separators, not grid lines
+
+  // 2. evenly spaced lines of the same height form a grid
+  thin.sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0);
+  const used = new Set<VLine>();
+  const boxes: PxBox[] = [];
+  for (const l of thin) {
+    if (used.has(l)) continue;
+    const same = thin
+      .filter((o) => !used.has(o) && Math.abs(o.y0 - l.y0) <= 3 && Math.abs(o.y1 - l.y1) <= 3)
+      .sort((a, b) => a.x0 - b.x0);
+    // split into runs with consistent spacing
+    let run: VLine[] = [];
+    const flush = () => {
+      if (run.length >= 4) {
+        const x0 = run[0].x0;
+        const x1 = run[run.length - 1].x1;
+        const y0 = Math.min(...run.map((r) => r.y0));
+        const y1 = Math.max(...run.map((r) => r.y1));
+        if (horizontalLines(x0, x1, y0, y1) >= 4) {
+          boxes.push({ x0, x1, y0, y1 });
+          run.forEach((r) => used.add(r));
+        }
+      }
+      run = [];
+    };
+    for (const o of same) {
+      if (!run.length) {
+        run.push(o);
+        continue;
+      }
+      const d = o.x0 - run[run.length - 1].x0;
+      const avg = run.length >= 2 ? (run[run.length - 1].x0 - run[0].x0) / (run.length - 1) : d;
+      const okSpacing = d >= W * 0.005 && d <= W * 0.03 && Math.abs(d - avg) <= Math.max(2, avg * 0.25);
+      if (okSpacing) run.push(o);
+      else {
+        flush();
+        run.push(o);
+      }
+    }
+    flush();
+  }
+
+  function horizontalLines(x0: number, x1: number, y0: number, y1: number): number {
+    let count = 0;
+    let prev = false;
+    for (let y = y0; y <= y1; y++) {
+      let n = 0;
+      for (let x = x0; x <= x1; x++) n += faint(x, y) ? 1 : 0;
+      const hit = n >= (x1 - x0 + 1) * 0.85;
+      if (hit && !prev) count++;
+      prev = hit;
+    }
+    return count;
+  }
+
+  // Boxes printed edge to edge read as one wide grid: split them back into
+  // boxes of the usual width for this page.
+  if (!boxes.length) return boxes;
+  const widths = boxes.map((b) => b.x1 - b.x0).sort((a, b) => a - b);
+  const usual = widths[Math.floor(widths.length / 2)];
+  const out: PxBox[] = [];
+  for (const b of boxes) {
+    const w = b.x1 - b.x0;
+    const n = Math.round(w / (usual * 1.15));
+    if (n < 2) {
+      out.push(b);
+      continue;
+    }
+    const step = (w - usual) / (n - 1);
+    for (let k = 0; k < n; k++) {
+      const x0 = Math.round(b.x0 + k * step);
+      out.push({ x0, x1: Math.round(x0 + usual), y0: b.y0, y1: b.y1 });
+    }
+  }
+  return out;
+}
+
+/**
+ * Group chord boxes into rows. Each row becomes a pseudo-staff (lines = 0)
+ * whose measures are separated by the thick bars printed between boxes.
+ */
+function chartRows(lum: Uint8Array, W: number, H: number, boxes: PxBox[]): Staff[] {
+  const sorted = [...boxes].sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0);
+  const rows: PxBox[][] = [];
+  for (const b of sorted) {
+    const row = rows.find((r) => Math.abs(r[0].y0 - b.y0) < (b.y1 - b.y0) * 0.5);
+    if (row) row.push(b);
+    else rows.push([b]);
+  }
+
+  return rows.map((row) => {
+    row.sort((a, b) => a.x0 - b.x0);
+    const top = Math.min(...row.map((b) => b.y0));
+    const bottom = Math.max(...row.map((b) => b.y1));
+    const left = row[0].x0;
+    const right = row[row.length - 1].x1;
+    const h = bottom - top;
+
+    // measure bars: tall dark columns between boxes
+    const inBox = (x: number) => row.some((b) => x >= b.x0 - 3 && x <= b.x1 + 3);
+    const bars: number[] = [];
+    let run = -1;
+    const scanFrom = Math.max(0, Math.floor(left - W * 0.05));
+    const scanTo = Math.min(W - 1, Math.ceil(right + W * 0.05));
+    for (let x = scanFrom; x <= scanTo + 1; x++) {
+      let hit = false;
+      if (x <= scanTo && !inBox(x)) {
+        let n = 0;
+        const ya = Math.floor(top + h * 0.15);
+        const yb = Math.ceil(bottom - h * 0.15);
+        for (let y = ya; y <= yb; y++) n += lum[y * W + x] < 160 ? 1 : 0;
+        hit = n >= (yb - ya + 1) * 0.9;
+      }
+      if (hit && run < 0) run = x;
+      if (!hit && run >= 0) {
+        if (x - run >= 2) bars.push((run + x - 1) / 2);
+        run = -1;
+      }
+    }
+
+    // Measures: stretches between bars that contain boxes. Inside a stretch, boxes
+    // packed tightly together share a measure; widely spaced ones get one each.
+    const edges = [-Infinity, ...bars, Infinity];
+    const starts: number[] = [];
+    for (let i = 0; i < edges.length - 1; i++) {
+      const inside = row.filter((b) => b.x0 > edges[i] && b.x1 < edges[i + 1]);
+      inside.forEach((b, j) => {
+        const w = b.x1 - b.x0;
+        if (j === 0 || b.x0 - inside[j - 1].x1 > w * 0.6) starts.push(b.x0);
+      });
+    }
+    const bounds = [...starts, right];
+
+    return {
+      lines: 0,
+      top: top / H,
+      bottom: bottom / H,
+      left: left / W,
+      right: right / W,
+      bars: bars.filter((x) => x > left && x < right).map((x) => x / W),
+      bounds: bounds.map((x) => x / W),
+      measures: Math.max(1, starts.length),
+    };
+  });
 }
 
 /** Which staves drive the timing: tab staves if the score has any, otherwise standard staves. */
 export function pickSystemLines(pages: PageAnalysis[]): number {
-  return pages.some((p) => p.staves.some((s) => s.lines === 6)) ? 6 : 5;
+  for (const n of [6, 5, 0]) if (pages.some((p) => p.staves.some((s) => s.lines === n))) return n;
+  return 6;
 }

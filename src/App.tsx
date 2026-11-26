@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadPdf, renderPage, type PDFDocumentProxy } from './pdf';
-import { analyzePage, pickSystemLines, type PageAnalysis } from './analysis';
+import { analyzePage, emptyAnalysis, pickSystemLines, type PageAnalysis } from './analysis';
 import { buildChordEvents, type ChordEvent, type SystemRef } from './chords';
 import { Timeline, type SystemPos } from './timeline';
 import { useAutoScroll, type ScrollDriver } from './useAutoScroll';
@@ -81,6 +81,7 @@ export default function App() {
 
   const [analyses, setAnalyses] = useState<PageAnalysis[] | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState<{ done: number; total: number } | null>(null);
   const [currentSys, setCurrentSys] = useState(-1);
   const [currentChord, setCurrentChord] = useState(-1);
 
@@ -129,12 +130,15 @@ export default function App() {
 
   /* ---------- per-song settings ---------- */
   const songKey = doc ? `ts.song.${fileName}.${doc.numPages}` : '';
+  // measure counts are only remembered once you've corrected one by hand,
+  // so improvements to detection still reach songs you opened before
+  const measuresEdited = useRef(false);
   useEffect(() => {
     if (!songKey || !analyses) return;
     save(songKey, {
       bpm,
       timeSig,
-      measures: systems.map(measuresOf),
+      measures: measuresEdited.current ? systems.map(measuresOf) : [],
     } satisfies SongSettings);
   }, [songKey, analyses, systems, bpm, timeSig, measuresOf]);
 
@@ -282,7 +286,7 @@ export default function App() {
           out.push(await analyzePage(doc, i));
         } catch (e) {
           console.warn('analysis failed on page', i, e);
-          out.push({ staves: [], notes: [], labels: [], tempo: null, capo: null, aspect: 1.414 });
+          out.push(emptyAnalysis());
         }
         if (cancelled) return;
       }
@@ -293,20 +297,44 @@ export default function App() {
         setTimeSig(saved.timeSig);
         const want = pickSystemLines(out);
         const sys = out.flatMap((pa) => pa.staves.filter((s) => s.lines === want));
-        if (saved.measures.length === sys.length) sys.forEach((s, i) => (s.measures = saved.measures[i]));
+        measuresEdited.current = saved.measures.length > 0 && saved.measures.length === sys.length;
+        if (measuresEdited.current) sys.forEach((s, i) => (s.measures = saved.measures[i]));
       } else {
+        measuresEdited.current = false;
         const t = out.find((a) => a.tempo !== null)?.tempo;
         if (t) setBpm(t);
       }
       setAnalyses(out);
       setAnalyzing(false);
+
+      // Scanned pages: read chord names / fret numbers from the image (slow, so after the fact).
+      const scanned = out.map((pa, i) => ({ pa, i })).filter(({ pa }) => pa.needsOcr && pa.staves.length);
+      if (!scanned.length) return;
+      const { ocrPage } = await import('./ocr');
+      for (let k = 0; k < scanned.length; k++) {
+        if (cancelled) return;
+        setOcrProgress({ done: k, total: scanned.length });
+        try {
+          const { i, pa } = scanned[k];
+          const found = await ocrPage(doc, i + 1, pa);
+          if (cancelled) return;
+          setAnalyses((prev) =>
+            prev ? prev.map((p, pi) => (pi === i ? { ...p, labels: found.labels, notes: found.notes } : p)) : prev,
+          );
+        } catch (e) {
+          console.warn('OCR failed on page', scanned[k].i + 1, e);
+        }
+      }
+      if (!cancelled) setOcrProgress(null);
     })();
     return () => {
       cancelled = true;
+      setOcrProgress(null);
     };
   }, [doc, fileName]);
 
   const adjustMeasures = (r: SystemRef, delta: number) => {
+    measuresEdited.current = true;
     setAnalyses((prev) =>
       prev
         ? prev.map((pa, pi) =>
@@ -452,6 +480,7 @@ export default function App() {
       const ss = String(Math.round(secs % 60)).padStart(2, '0');
       status = `${systems.length}줄 · ${totalMeasures}마디 · 약 ${mm}:${ss}`;
       if (capo) status += ` · Capo ${capo}`;
+      if (ocrProgress) status += ` · 스캔 악보 읽는 중 (OCR) ${ocrProgress.done}/${ocrProgress.total}`;
     } else if (analyses) status = '줄을 찾지 못해 수동 속도로 스크롤해요';
   }
 
